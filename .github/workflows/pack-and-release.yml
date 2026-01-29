@@ -1,0 +1,118 @@
+name: Pack and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pack Classic and TBC zips
+        shell: pwsh
+        run: |
+          ./pack.ps1
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: thirsttrap-zips
+          path: |
+            dist/ThirstTrap-Classic.zip
+            dist/ThirstTrap-TBC.zip
+
+  release:
+    needs: build
+    runs-on: windows-latest
+    if: ${{ github.event_name == 'push' }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: thirsttrap-zips
+          path: dist
+
+      - name: Prepare metadata
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}"  # e.g. v0.1.0
+          $env:ADDON_VERSION = $version.TrimStart('v')
+          Write-Host "Version: $env:ADDON_VERSION"
+          if ($version -like "*-beta*") { $env:RELEASE_TYPE = "beta" } else { $env:RELEASE_TYPE = "release" }
+          Write-Host "Release type: $env:RELEASE_TYPE"
+
+      - name: CurseForge Upload (webhook Classic)
+        if: ${{ secrets.CF_WEBHOOK_URL && secrets.CF_API_TOKEN && secrets.CF_PROJECT_ID }}
+        shell: pwsh
+        run: |
+          $uri = "${{ secrets.CF_WEBHOOK_URL }}" # e.g. https://api.curseforge.com/v1/projects/$PROJECT_ID/upload-file
+          $headers = @{ 'X-Api-Token' = "${{ secrets.CF_API_TOKEN }}" }
+          $projectId = "${{ secrets.CF_PROJECT_ID }}"
+          $file = Get-Item "dist/ThirstTrap-Classic.zip"
+          $releaseType = $env:RELEASE_TYPE  # release | beta | alpha
+          $gameVersions = @("classic")
+          $suffix = ($releaseType -eq "beta") ? " (Beta)" : ""
+          $changelog = "Automated release for Classic" + $suffix
+
+          $form = @{
+            metadata = (@{
+              changelog = $changelog
+              changelogType = 'markdown'
+              displayName = "ThirstTrap $env:ADDON_VERSION (Classic)" + $suffix
+              gameVersions = $gameVersions
+              releaseType = $releaseType
+            } | ConvertTo-Json -Compress)
+            file = $file
+          }
+
+          try {
+            Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Form $form
+            Write-Host "Uploaded Classic to CurseForge"
+          } catch {
+            Write-Host "CurseForge upload (Classic) failed: $_" -ForegroundColor Red
+          }
+
+      - name: CurseForge Upload (webhook TBC)
+        if: ${{ secrets.CF_WEBHOOK_URL && secrets.CF_API_TOKEN && secrets.CF_PROJECT_ID }}
+        shell: pwsh
+        run: |
+          $uri = "${{ secrets.CF_WEBHOOK_URL }}"
+          $headers = @{ 'X-Api-Token' = "${{ secrets.CF_API_TOKEN }}" }
+          $file = Get-Item "dist/ThirstTrap-TBC.zip"
+          $releaseType = $env:RELEASE_TYPE
+          $gameVersions = @("tbc")
+          $suffix = ($releaseType -eq "beta") ? " (Beta)" : ""
+          $changelog = "Automated release for TBC" + $suffix
+
+          $form = @{
+            metadata = (@{
+              changelog = $changelog
+              changelogType = 'markdown'
+              displayName = "ThirstTrap $env:ADDON_VERSION (TBC)" + $suffix
+              gameVersions = $gameVersions
+              releaseType = $releaseType
+            } | ConvertTo-Json -Compress)
+            file = $file
+          }
+
+          try {
+            Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Form $form
+            Write-Host "Uploaded TBC to CurseForge"
+          } catch {
+            Write-Host "CurseForge upload (TBC) failed: $_" -ForegroundColor Red
+          }
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/ThirstTrap-Classic.zip
+            dist/ThirstTrap-TBC.zip
+          token: ${{ secrets.GITHUB_TOKEN }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-beta') }}

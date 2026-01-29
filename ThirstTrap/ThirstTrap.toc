@@ -1,0 +1,16 @@
+## Interface: 11404
+## Title: ThirstTrap
+## Notes: Mage trade helper using Ace3, secure click only
+## Author: Pegga
+## Version: 0.1.0
+## SavedVariables: ThirstTrapDB, ThirstTrapStats
+## OptionalDeps: Ace3, LibDBIcon-1.0
+## X-Embeds: Ace3, LibDBIcon-1.0
+
+Embeds.xml
+DB/classic/Items.lua
+Core.lua
+Inventory.lua
+Whisper.lua
+Config.lua
+Minimap.lua
