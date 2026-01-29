@@ -243,6 +243,23 @@ function ThirstTrap:UpdateTradeButtonGlow()
     end
   end
 end
+function ThirstTrap:CreateTradeButton()
+  if not TRADE_BTN then
+    TRADE_BTN = CreateFrame("Button", ADDON_NAME.."TradeButton", UIParent, "SecureActionButtonTemplate")
+    TRADE_BTN:SetSize(36, 36)
+    TRADE_BTN:SetFrameStrata("HIGH")
+    TRADE_BTN:SetFrameLevel(TradeFrame and (TradeFrame:GetFrameLevel() + 10) or 50)
+    local icon = TRADE_BTN:CreateTexture(nil, "BACKGROUND")
+    icon:SetAllPoints(TRADE_BTN)
+    TRADE_BTN.icon = icon
+    local border = TRADE_BTN:CreateTexture(nil, "ARTWORK")
+    border:SetTexture("Interface\\Buttons\\UI-Quickslot2")
+    border:SetAllPoints(TRADE_BTN)
+    border:SetVertexColor(1, 1, 1)
+    TRADE_BTN.border = border
+  end
+  self:UpdateTradeButtonPosition()
+
   TRADE_BTN:SetScript("PreClick", function(btn, mouseButton)
     -- All protected actions must happen here during the secure click
     if mouseButton ~= "LeftButton" then
