@@ -300,6 +300,8 @@ function ThirstTrap:CreateTradeButton()
     end
     if not (IsMage() or IsWarlock()) then return end
     if not (TradeFrame and TradeFrame:IsShown()) then return end
+    -- Refresh inventory just before placing to ensure up-to-date stacks
+    ThirstTrap:ScanInventory()
     if IsMage() then
       local targetClass = GetTradePartnerClass()
       local prefer, waterAmt, foodAmt = ThirstTrap:GetConfiguredAmounts(targetClass)
@@ -423,7 +425,10 @@ end
 
 local function TradeSlotButton(slot)
   -- Prefer player's trade slots on the left
-  local btn = _G["TradePlayerItem"..slot.."ItemButton"]
+  local btn = _G["TradePlayerItem"..slot]
+  if btn and btn.GetName and _G[btn:GetName().."ItemButton"] then
+    btn = _G[btn:GetName().."ItemButton"]
+  end
   if btn then return btn end
   -- Fallbacks for different UI naming
   btn = _G["TradeFrameItem"..slot.."ItemButton"]
@@ -495,13 +500,13 @@ function ThirstTrap:UpdateTradeButtonIcon()
   if not TRADE_BTN then return end
   local icon
   if IsWarlock() then
-    icon = inv.stone.itemID and select(10, GetItemInfo(inv.stone.itemID)) or nil
+    icon = (inv.stone.itemID and (GetItemIcon and GetItemIcon(inv.stone.itemID))) or select(10, GetItemInfo(inv.stone.itemID)) or nil
   else
-    icon = inv.water.itemID and select(10, GetItemInfo(inv.water.itemID)) or nil
+    icon = (inv.water.itemID and (GetItemIcon and GetItemIcon(inv.water.itemID))) or select(10, GetItemInfo(inv.water.itemID)) or nil
     if self.db.profile.prefer == "food" then
-      icon = inv.food.itemID and select(10, GetItemInfo(inv.food.itemID)) or icon
+      icon = (inv.food.itemID and (GetItemIcon and GetItemIcon(inv.food.itemID))) or select(10, GetItemInfo(inv.food.itemID)) or icon
     else
-      icon = inv.water.itemID and select(10, GetItemInfo(inv.water.itemID)) or icon
+      icon = (inv.water.itemID and (GetItemIcon and GetItemIcon(inv.water.itemID))) or select(10, GetItemInfo(inv.water.itemID)) or icon
     end
   end
   if icon then
