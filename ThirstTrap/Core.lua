@@ -384,7 +384,7 @@ function ThirstTrap:NeedsConjure(prefer, waterAmt, foodAmt, bagStacks)
   return false, nil
 end
 
-local function ShouldConjure(prefer, waterAmt, foodAmt, bagStacks)
+ShouldConjure = function(prefer, waterAmt, foodAmt, bagStacks)
   local waterStacks = (bagStacks.water and #bagStacks.water or 0)
   local foodStacks  = (bagStacks.food  and #bagStacks.food  or 0)
   if waterAmt > waterStacks and waterStacks == 0 then return true, "water" end
