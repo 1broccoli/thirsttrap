@@ -242,6 +242,9 @@ function ThirstTrap:CreateTradeButton()
   TRADE_BTN:RegisterForClicks("AnyUp")
 
   TRADE_BTN:SetScript("PreClick", function(btn, mouseButton)
+      if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
+        ThirstTrap:Print("PreClick mouse="..tostring(mouseButton))
+      end
     if mouseButton ~= "LeftButton" then
       btn:SetAttribute("type", nil)
       btn:SetAttribute("spell", nil)
@@ -257,8 +260,14 @@ function ThirstTrap:CreateTradeButton()
       local prefer, waterAmt, foodAmt = ThirstTrap:GetConfiguredAmounts(targetClass)
       local bagStacks = ThirstTrap:GetBagStacks()
       local needConjure, needKind = ThirstTrap:NeedsConjure(prefer, waterAmt, foodAmt, bagStacks)
+        if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
+          ThirstTrap:Print(string.format("PreClick conjure? %s kind=%s", tostring(needConjure), tostring(needKind)))
+        end
       if ThirstTrap.db.profile.fallbackConjure and needConjure then
         local spell = ThirstTrap:GetConjureSpell(needKind)
+          if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
+            ThirstTrap:Print("PreClick spell="..tostring(spell))
+          end
         if spell then
           btn:SetAttribute("type", "spell")
           btn:SetAttribute("spell", spell)
@@ -302,6 +311,10 @@ function ThirstTrap:CreateTradeButton()
     if not (TradeFrame and TradeFrame:IsShown()) then return end
     -- Refresh inventory just before placing to ensure up-to-date stacks
     ThirstTrap:ScanInventory()
+      if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
+        local bs = ThirstTrap:GetBagStacks()
+        ThirstTrap:Print(string.format("Click stacks: water=%d food=%d stone=%d", #(bs.water or {}), #(bs.food or {}), #(bs.stone or {})))
+      end
     if IsMage() then
       local targetClass = GetTradePartnerClass()
       local prefer, waterAmt, foodAmt = ThirstTrap:GetConfiguredAmounts(targetClass)
@@ -441,7 +454,13 @@ local function PlaceStackFromBagToTrade(bag, slot, tradeSlot)
   ClearCursor()
   PickupBagItem(bag, slot)
   local btn = TradeSlotButton(tradeSlot)
-  if btn then btn:Click() end
+  if btn then
+    btn:Click()
+  else
+    if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
+      ThirstTrap:Print("Trade slot button missing for slot "..tostring(tradeSlot))
+    end
+  end
   ClearCursor()
 end
 
