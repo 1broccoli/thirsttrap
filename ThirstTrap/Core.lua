@@ -43,10 +43,9 @@ end
 
 ThirstTrap.defaults = {
   profile = {
-    auto = true,
+    quick = true,
     minimap = { hide = false },
     fallbackConjure = true,
-    debug = false,
     position = { point = "LEFT", relativePoint = "RIGHT", x = 8, y = -28 },
     perClass = {
       WARRIOR = { water = 0, food = 4 },
@@ -77,6 +76,8 @@ local inv = {
 }
 
 local TRADE_BTN
+local TRADE_BTN_FOOD
+ThirstTrap.pendingStoneTrade = false
 local function IsMage()
   local _, class = UnitClass("player")
   return class == "MAGE"
@@ -105,9 +106,13 @@ local function GetTradePartnerName()
 end
 
 local function GetTradePartnerClass()
+  -- During a trade, WoW exposes the partner as unit "NPC"
+  if TradeFrame and TradeFrame:IsShown() then
+    local _, class = UnitClass("NPC")
+    if class then return class end
+  end
   local name = GetTradePartnerName()
   if not name then return nil end
-  -- Best-effort: try target, else nil
   if UnitName("target") == name then
     local _, class = UnitClass("target")
     return class
@@ -117,6 +122,12 @@ end
 
 function ThirstTrap:OnInitialize()
   self.db = LibStub("AceDB-3.0"):New("ThirstTrapDB", self.defaults, true)
+  -- migrate legacy 'auto' -> 'quick' if present
+  if self.db and self.db.profile then
+    if self.db.profile.quick == nil and self.db.profile.auto ~= nil then
+      self.db.profile.quick = self.db.profile.auto
+    end
+  end
   ThirstTrapStats = ThirstTrapStats or { lifetime = { water = 0, food = 0 }, daily = { date = nil, water = 0, food = 0 } }
   self.stats = ThirstTrapStats
   self:EnsureDailyDate()
@@ -133,14 +144,14 @@ function ThirstTrap:OnInitialize()
         if button == "LeftButton" then
           self:OpenConfig()
         else
-          self.db.profile.auto = not self.db.profile.auto
+          self.db.profile.quick = not self.db.profile.quick
           self:UpdateTradeButtonGlow()
-          self:Print("Auto trade: " .. (self.db.profile.auto and "ON" or "OFF"))
+          self:Print("Quick trade: " .. (self.db.profile.quick and "ON" or "OFF"))
         end
       end,
       OnTooltipShow = function(tt)
         tt:AddLine(ADDON_NAME)
-        tt:AddLine("Left: Config\nRight: Toggle Auto", 1,1,1)
+        tt:AddLine("Left: Config\nRight: Toggle Quick", 1,1,1)
       end,
     })
   end
@@ -151,6 +162,9 @@ function ThirstTrap:OnInitialize()
   self:RegisterEvent("TRADE_SHOW", "OnTradeShow")
   self:RegisterEvent("TRADE_CLOSED", "OnTradeClosed")
   self:RegisterEvent("CHAT_MSG_WHISPER", "OnWhisper")
+
+  -- Slash: /tt stone or /tt hs to place/conjure healthstone
+  self:RegisterChatCommand("tt", "HandleSlash")
 end
 
 function ThirstTrap:OnEnable()
@@ -172,7 +186,7 @@ function ThirstTrap:EnsureDailyDate()
 end
 
 function ThirstTrap:OnLogin()
-  self:CreateTradeButton()
+  -- UI buttons removed; just scan inventory
   self:ScanInventory()
 end
 
@@ -180,14 +194,28 @@ function ThirstTrap:OnBagUpdate()
   self:ScanInventory()
   self:UpdateTradeButtonIcon()
   self:UpdateTradeButtonGlow()
+  -- If we were waiting to conjure a stone, and now have one, place it
+  if self.pendingStoneTrade and (TradeFrame and TradeFrame:IsShown()) then
+    local stacks = self:GetBagStacks().stone
+    if stacks and stacks[1] then
+      local slot = self:FirstEmptyTradeSlot()
+      if slot then
+        PlaceStackFromBagToTrade(stacks[1].bag, stacks[1].slot, slot)
+        self:IncrementStats("stone", stacks[1].count or 1)
+      end
+      self.pendingStoneTrade = false
+    end
+  end
 end
 
 function ThirstTrap:OnTradeShow()
-  -- Ensure the button exists once TradeFrame is actually loaded
-  self:CreateTradeButton()
-  if TRADE_BTN then TRADE_BTN:Show() end
-  self:UpdateTradeButtonState()
-  self:UpdateTradeButtonGlow()
+  -- UI buttons removed; proceed with auto logic only
+  -- Auto-fill on trade open if enabled
+  if self.db.profile.quick then
+    if IsMage() then
+      self:ExecuteTrade()
+    end
+  end
 end
 
 function ThirstTrap:OnTradeClosed()
@@ -195,6 +223,7 @@ function ThirstTrap:OnTradeClosed()
   self.requestOverride.food = nil
   self.requestOverride.prefer = nil
   if TRADE_BTN then TRADE_BTN:Hide() end
+  if TRADE_BTN_FOOD then TRADE_BTN_FOOD:Hide() end
 end
 
 function ThirstTrap:OnWhisper(msg, sender)
@@ -224,161 +253,82 @@ end
 
 function ThirstTrap:UpdateTradeButtonGlow()
   if not TRADE_BTN then return end
-  local needConjure = false
+  local inTrade = TradeFrame and TradeFrame:IsShown()
+  if not inTrade then
+    if LBG then LBG.HideOverlayGlow(TRADE_BTN) end
+    TRADE_BTN.border:SetVertexColor(1, 1, 1)
+    if TRADE_BTN_FOOD then
+      if LBG then LBG.HideOverlayGlow(TRADE_BTN_FOOD) end
+      TRADE_BTN_FOOD.border:SetVertexColor(1, 1, 1)
+    end
+    return
+  end
   if IsMage() then
     local targetClass = GetTradePartnerClass()
-    local prefer, waterAmt, foodAmt = self:GetConfiguredAmounts(targetClass)
-    local bagStacks = self:GetBagStacks()
-    needConjure = self:NeedsConjure(prefer, waterAmt, foodAmt, bagStacks)
-  elseif IsWarlock() then
-    needConjure = self:NeedsConjureWarlock()
-  end
-  if self.db.profile.fallbackConjure and needConjure then
-    if LBG then LBG.ShowOverlayGlow(TRADE_BTN) else TRADE_BTN.border:SetVertexColor(1, 0.3, 0.3) end
-  else
-    if LBG then LBG.HideOverlayGlow(TRADE_BTN) end
-    if self.db.profile.auto or self.requestOverride.prefer then
-      TRADE_BTN.border:SetVertexColor(0, 1, 1)
+    local _, waterAmt, foodAmt = self:GetConfiguredAmounts(targetClass)
+    local stacks = self:GetBagStacks()
+    local needWater = waterAmt > ((stacks.water and #stacks.water) or 0)
+    local needFood  = foodAmt  > ((stacks.food  and #stacks.food)  or 0)
+
+    if self.db.profile.fallbackConjure and needWater then
+      if LBG then LBG.ShowOverlayGlow(TRADE_BTN) else TRADE_BTN.border:SetVertexColor(1, 0.3, 0.3) end
     else
+      if LBG then LBG.HideOverlayGlow(TRADE_BTN) end
+      TRADE_BTN.border:SetVertexColor((self.db.profile.quick and 0) or 1, (self.db.profile.quick and 1) or 1, (self.db.profile.quick and 1) or 1)
+    end
+    if TRADE_BTN_FOOD then
+      if self.db.profile.fallbackConjure and needFood then
+        if LBG then LBG.ShowOverlayGlow(TRADE_BTN_FOOD) else TRADE_BTN_FOOD.border:SetVertexColor(1, 0.3, 0.3) end
+      else
+        if LBG then LBG.HideOverlayGlow(TRADE_BTN_FOOD) end
+        TRADE_BTN_FOOD.border:SetVertexColor((self.db.profile.quick and 0) or 1, (self.db.profile.quick and 1) or 1, (self.db.profile.quick and 1) or 1)
+      end
+    end
+  else
+    -- Warlock or other classes: handle main button, disable food glow
+    local needConjure = self:NeedsConjureWarlock()
+    if self.db.profile.fallbackConjure and needConjure then
+      if LBG then LBG.ShowOverlayGlow(TRADE_BTN) else TRADE_BTN.border:SetVertexColor(1, 0.3, 0.3) end
+    else
+      if LBG then LBG.HideOverlayGlow(TRADE_BTN) end
       TRADE_BTN.border:SetVertexColor(1, 1, 1)
+    end
+    if TRADE_BTN_FOOD then
+      if LBG then LBG.HideOverlayGlow(TRADE_BTN_FOOD) end
+      TRADE_BTN_FOOD.border:SetVertexColor(1, 1, 1)
     end
   end
 end
 function ThirstTrap:CreateTradeButton()
-  if not TRADE_BTN then
-    TRADE_BTN = CreateFrame("Button", ADDON_NAME.."TradeButton", UIParent, "SecureActionButtonTemplate")
-    TRADE_BTN:SetSize(36, 36)
-    TRADE_BTN:SetFrameStrata("HIGH")
-    TRADE_BTN:SetFrameLevel(TradeFrame and (TradeFrame:GetFrameLevel() + 10) or 50)
-    local icon = TRADE_BTN:CreateTexture(nil, "BACKGROUND")
-    icon:SetAllPoints(TRADE_BTN)
-    TRADE_BTN.icon = icon
-    local border = TRADE_BTN:CreateTexture(nil, "ARTWORK")
-    border:SetTexture("Interface\\Buttons\\UI-Quickslot2")
-    border:SetAllPoints(TRADE_BTN)
-    border:SetVertexColor(1, 1, 1)
-    TRADE_BTN.border = border
-  end
-  self:UpdateTradeButtonPosition()
-
-  TRADE_BTN:SetScript("PreClick", function(btn, mouseButton)
-    -- All protected actions must happen here during the secure click
-    if mouseButton ~= "LeftButton" then
-      btn:SetAttribute("type", nil)
-      btn:SetAttribute("spell", nil)
-      return
-    end
-    if not (IsMage() or IsWarlock()) then
-      btn:SetAttribute("type", nil)
-      btn:SetAttribute("spell", nil)
-      return
-    end
-    if IsMage() then
-      local p = btn.pending
-      if not p then
-        local targetClass = GetTradePartnerClass()
-        local prefer, waterAmt, foodAmt = ThirstTrap:GetConfiguredAmounts(targetClass)
-        local bagStacks = ThirstTrap:GetBagStacks()
-        local needConjure, needKind = ShouldConjure(prefer, waterAmt, foodAmt, bagStacks)
-        if ThirstTrap.db.profile.fallbackConjure and needConjure then
-          local spell = ThirstTrap:GetConjureSpell(needKind)
-          if spell then
-            btn:SetAttribute("type", "spell")
-            btn:SetAttribute("spell", spell)
-            if ThirstTrap.db.profile.debug then
-              ThirstTrap:Print("Casting conjure: "..tostring(spell))
-            end
-            return
-          end
-        end
-        return
-      end
-      btn:SetAttribute("type", "macro")
-      local macro = "/click "..p.containerButton.."\n/click TradePlayerItem"..p.tradeSlot.."ItemButton"
-      btn:SetAttribute("macrotext", macro)
-      if ThirstTrap.db.profile.debug then
-        ThirstTrap:Print("Macro: "..macro)
-      end
-      return
-    elseif IsWarlock() then
-      local needConjure = ThirstTrap:NeedsConjureWarlock()
-      if ThirstTrap.db.profile.fallbackConjure and needConjure then
-        local spell = ThirstTrap:GetConjureStoneSpell()
-        if spell then
-          btn:SetAttribute("type", "spell")
-          btn:SetAttribute("spell", spell)
-          return
-        end
-      end
-      local p = btn.pending
-      if p then
-        btn:SetAttribute("type", "macro")
-        local macro = "/click "..p.containerButton.."\n/click TradePlayerItem"..p.tradeSlot.."ItemButton"
-        btn:SetAttribute("macrotext", macro)
-        if ThirstTrap.db.profile.debug then
-          ThirstTrap:Print("Macro: "..macro)
-        end
-        return
-      end
-    end
-    btn:SetAttribute("type", nil)
-    btn:SetAttribute("spell", nil)
-  end)
-
-  TRADE_BTN:SetScript("PostClick", function(btn)
-    local p = btn.pending
-    if p and ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
-      ThirstTrap:Print(string.format("PostClick: placed %s to tradeSlot=%d (bag=%d slot=%d)", tostring(p.kind), tonumber(p.tradeSlot or 0), tonumber(p.bag or -1), tonumber(p.slot or -1)))
-    end
-    if p then
-      ThirstTrap:IncrementStats(p.kind, 1)
-    end
-    btn.pending = nil
-    ThirstTrap:PlanNextPending()
-  end)
-
-  TRADE_BTN:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:AddLine(ADDON_NAME)
-    GameTooltip:AddLine("Left-click: place configured stacks", 1,1,1)
-    GameTooltip:AddLine("Right-click: open config", 1,1,1)
-    local targetClass = GetTradePartnerClass()
-    local prefer, waterAmt, foodAmt = ThirstTrap:GetConfiguredAmounts(targetClass)
-    GameTooltip:AddLine(string.format("Will place: %d %s%s", (prefer=="food" and foodAmt or waterAmt), (prefer=="food" and "food" or "water"), (prefer=="food" and (waterAmt>0 and " / "..waterAmt.." water" or "") or (foodAmt>0 and " / "..foodAmt.." food" or ""))), 0.8,1,0.8)
-    local p = TRADE_BTN.pending
-    if p then
-      GameTooltip:AddLine(string.format("Next click: %s → slot %d", p.kind, p.tradeSlot or 1), 1,1,0.6)
-    end
-    local needLine = ThirstTrap:GetNeedsTooltipLine()
-    if needLine then GameTooltip:AddLine(needLine, 1,0.8,0.8) end
-    GameTooltip:Show()
-  end)
-  TRADE_BTN:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-  TRADE_BTN:SetScript("OnClick", function(btn, mouseButton)
-    if mouseButton == "RightButton" then
-      ThirstTrap:OpenConfig()
-    end
-    -- All placement happens in PreClick; OnClick only handles right-click config
-  end)
-
-  self:UpdateTradeButtonIcon()
-  self:UpdateTradeButtonState()
-  self:UpdateTradeButtonGlow()
+  -- Buttons removed; keep function for compatibility
+  return
 end
 
 function ThirstTrap:UpdateTradeButtonPosition()
-  if not TRADE_BTN or not TradeFrame then return end
+  if not TradeFrame then return end
   local pos = self.db and self.db.profile and self.db.profile.position or { point = "LEFT", relativePoint = "RIGHT", x = 8, y = -28 }
-  TRADE_BTN:ClearAllPoints()
-  TRADE_BTN:SetPoint(pos.point or "LEFT", TradeFrame, pos.relativePoint or "RIGHT", pos.x or 8, pos.y or -28)
+  if TRADE_BTN then
+    TRADE_BTN:ClearAllPoints()
+    TRADE_BTN:SetPoint(pos.point or "LEFT", TradeFrame, pos.relativePoint or "RIGHT", pos.x or 8, pos.y or -28)
+  end
+  if TRADE_BTN_FOOD then
+    TRADE_BTN_FOOD:ClearAllPoints()
+    TRADE_BTN_FOOD:SetPoint(pos.point or "LEFT", TradeFrame, pos.relativePoint or "RIGHT", (pos.x or 8) + 40, pos.y or -28)
+  end
 end
 
 function ThirstTrap:UpdateTradeButtonState()
-  if not TRADE_BTN then return end
   local enabled = (IsMage() or IsWarlock())
-  TRADE_BTN:SetEnabled(enabled)
-  TRADE_BTN:SetAlpha(enabled and 1 or 0.4)
+  if TRADE_BTN then
+    TRADE_BTN:SetEnabled(enabled)
+    TRADE_BTN:SetAlpha(enabled and 1 or 0.4)
+    TRADE_BTN:SetShown(IsMage() or IsWarlock())
+  end
+  if TRADE_BTN_FOOD then
+    TRADE_BTN_FOOD:SetEnabled(IsMage())
+    TRADE_BTN_FOOD:SetAlpha(IsMage() and 1 or 0.4)
+    TRADE_BTN_FOOD:SetShown(IsMage())
+  end
 end
 
 function ThirstTrap:GetConfiguredAmounts(targetClass)
@@ -429,6 +379,7 @@ function ThirstTrap:GetConjureSpell(kind)
 end
 
 function ThirstTrap:GetNeedsTooltipLine()
+  if not (TradeFrame and TradeFrame:IsShown()) then return nil end
   if IsWarlock() then
     if (inv.stone.stacks or 0) == 0 then
       return "Needs: Healthstone"
@@ -445,8 +396,40 @@ function ThirstTrap:GetNeedsTooltipLine()
     local needWater = math.max(0, waterAmt - waterStacks)
     local needFood  = math.max(0, foodAmt  - foodStacks)
     if needWater > 0 or needFood > 0 then
-      return string.format("Needs: %d water%s%s", needWater, (needFood>0 and " / " .. needFood .. " food" or ""), "")
+      if needFood > 0 and needWater == 0 then
+        return string.format("Needs: %d food", needFood)
+      elseif needWater > 0 and needFood == 0 then
+        return string.format("Needs: %d water", needWater)
+      else
+        return string.format("Needs: %d water / %d food", needWater, needFood)
+      end
     end
+  end
+  return nil
+end
+
+function ThirstTrap:GetWaterNeedsTooltipLine()
+  if not (TradeFrame and TradeFrame:IsShown()) then return nil end
+  if IsMage() then
+    local targetClass = GetTradePartnerClass()
+    local _, waterAmt, _ = self:GetConfiguredAmounts(targetClass)
+    local bagStacks = self:GetBagStacks()
+    local waterStacks = (bagStacks.water and #bagStacks.water or 0)
+    local needWater = math.max(0, waterAmt - waterStacks)
+    if needWater > 0 then return string.format("Needs: %d water", needWater) end
+  end
+  return nil
+end
+
+function ThirstTrap:GetFoodNeedsTooltipLine()
+  if not (TradeFrame and TradeFrame:IsShown()) then return nil end
+  if IsMage() then
+    local targetClass = GetTradePartnerClass()
+    local _, _, foodAmt = self:GetConfiguredAmounts(targetClass)
+    local bagStacks = self:GetBagStacks()
+    local foodStacks = (bagStacks.food and #bagStacks.food or 0)
+    local needFood = math.max(0, foodAmt - foodStacks)
+    if needFood > 0 then return string.format("Needs: %d food", needFood) end
   end
   return nil
 end
@@ -458,16 +441,12 @@ end
 local function PlaceStackFromBagToTrade(bag, slot, tradeSlot)
   ClearCursor()
   PickupBagItem(bag, slot)
-  if type(ClickTradeButton) == "function" then
-    ClickTradeButton(tradeSlot)
+  local btn = TradeSlotButton(tradeSlot)
+  if btn then
+    btn:Click()
   else
-    local btn = TradeSlotButton(tradeSlot)
-    if btn and btn.Click then
-      btn:Click()
-    else
-      if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
-        ThirstTrap:Print("Trade slot button missing for slot "..tostring(tradeSlot))
-      end
+    if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
+      ThirstTrap:Print("Trade slot button missing for slot "..tostring(tradeSlot))
     end
   end
   ClearCursor()
@@ -525,26 +504,24 @@ function ThirstTrap:IncrementStats(kind, count)
 end
 
 function ThirstTrap:UpdateTradeButtonIcon()
-  if not TRADE_BTN then return end
-  local icon
-  if IsWarlock() then
-    icon = (inv.stone.itemID and (GetItemIcon and GetItemIcon(inv.stone.itemID))) or select(10, GetItemInfo(inv.stone.itemID)) or nil
-  else
-    icon = (inv.water.itemID and (GetItemIcon and GetItemIcon(inv.water.itemID))) or select(10, GetItemInfo(inv.water.itemID)) or nil
-    if self.db.profile.prefer == "food" then
-      icon = (inv.food.itemID and (GetItemIcon and GetItemIcon(inv.food.itemID))) or select(10, GetItemInfo(inv.food.itemID)) or icon
-    else
-      icon = (inv.water.itemID and (GetItemIcon and GetItemIcon(inv.water.itemID))) or select(10, GetItemInfo(inv.water.itemID)) or icon
-    end
+  local waterIcon, foodIcon
+  if inv.water and inv.water.itemID then
+    local ok = pcall(function()
+      waterIcon = select(10, GetItemInfo(inv.water.itemID))
+    end)
+    if not ok then waterIcon = nil end
   end
-  if icon then
-    TRADE_BTN.icon:SetTexture(icon)
-  else
-    if IsWarlock() then
-      TRADE_BTN.icon:SetTexture(135230) -- healthstone icon fallback
-    else
-      TRADE_BTN.icon:SetTexture(134400) -- bread icon fallback
-    end
+  if inv.food and inv.food.itemID then
+    local ok = pcall(function()
+      foodIcon = select(10, GetItemInfo(inv.food.itemID))
+    end)
+    if not ok then foodIcon = nil end
+  end
+  if TRADE_BTN then
+    TRADE_BTN.icon:SetTexture(waterIcon or 132795)
+  end
+  if TRADE_BTN_FOOD then
+    TRADE_BTN_FOOD.icon:SetTexture(foodIcon or 134400)
   end
 end
 
@@ -568,9 +545,6 @@ function ThirstTrap:GetBagStacks()
   table.sort(stacks.water, function(a,b) return a.count > b.count end)
   table.sort(stacks.food,  function(a,b) return a.count > b.count end)
   table.sort(stacks.stone, function(a,b) return a.count > b.count end)
-  if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
-    ThirstTrap:Print(string.format("Scan: water=%d food=%d stone=%d", #stacks.water, #stacks.food, #stacks.stone))
-  end
   return stacks
 end
 
@@ -642,54 +616,48 @@ function ThirstTrap:ExecuteTradeWarlock()
   local stacks = self:GetBagStacks().stone
   local entry = stacks and stacks[1]
   if entry then
-    PlaceStackFromBagToTrade(entry.bag, entry.slot, 1)
+    local slot = self:FirstEmptyTradeSlot() or 1
+    PlaceStackFromBagToTrade(entry.bag, entry.slot, slot)
     self:IncrementStats("stone", entry.count or 1)
-  else
-    local who = GetTradePartnerName() or "friend"
-    self:Print("No healthstone available.")
-    SendChatMessage("Need to create a healthstone, one moment.", "WHISPER", nil, who)
+    return true
   end
+  return false
+end
 
-  local function FirstEmptyTradeSlot()
-    for i=1, MAX_TRADE_STACKS do
-      if not GetTradePlayerItemLink(i) then return i end
-    end
+function ThirstTrap:FirstEmptyTradeSlot()
+  for i=1, MAX_TRADE_STACKS do
+    local name = GetTradePlayerItemInfo(i)
+    if not name then return i end
   end
+end
 
-  function ThirstTrap:PlanNextPending()
-    if not TRADE_BTN or not TradeFrame or not TradeFrame:IsShown() then return end
-    local slot = FirstEmptyTradeSlot()
-    if not slot then
-      TRADE_BTN.pending = nil
+function ThirstTrap:ConjureHealthstone()
+  local spell = self:GetConjureStoneSpell()
+  if spell then
+    CastSpellByName(spell)
+    return true
+  end
+  return false
+end
+
+function ThirstTrap:HandleSlash(input)
+  input = (input or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+  if input == "stone" or input == "hs" then
+    if not (TradeFrame and TradeFrame:IsShown()) then
+      self:Print("Open a trade first to give a healthstone.")
       return
     end
-    local targetClass = GetTradePartnerClass()
-    local prefer, waterAmt, foodAmt = self:GetConfiguredAmounts(targetClass)
-    local stacks = self:GetBagStacks()
-    local order = {}
-    if prefer == "water" then
-      for i=1, waterAmt do order[#order+1] = "water" end
-      for i=1, foodAmt  do order[#order+1] = "food" end
+    if self:ExecuteTradeWarlock() then return end
+    local who = GetTradePartnerName()
+    if self:ConjureHealthstone() then
+      self.pendingStoneTrade = true
+      if who then SendChatMessage("Creating a healthstone, one moment.", "WHISPER", nil, who) end
     else
-      for i=1, foodAmt  do order[#order+1] = "food" end
-      for i=1, waterAmt do order[#order+1] = "water" end
+      self:Print("Unable to create a healthstone right now.")
+      if who then SendChatMessage("Unable to create a healthstone right now.", "WHISPER", nil, who) end
     end
-    local nextKind
-    for i=1,#order do
-      local k = order[i]
-      if stacks[k] and stacks[k][1] then
-        nextKind = k
-        break
-      end
-    end
-    if not nextKind then
-      TRADE_BTN.pending = nil
-      return
-    end
-    local entry = stacks[nextKind][1]
-    local containerButton = "ContainerFrame"..(entry.bag+1).."Item"..entry.slot
-    TRADE_BTN.pending = { kind = nextKind, bag = entry.bag, slot = entry.slot, tradeSlot = slot, containerButton = containerButton }
-    if self.db and self.db.profile and self.db.profile.debug then
-      self:Print(string.format("Planned: %s bag=%d slot=%d -> tradeSlot=%d (%s)", nextKind, entry.bag, entry.slot, slot, containerButton))
-    end
+    return
+  end
+  -- help
+  self:Print("Commands: /tt stone — place or create a healthstone")
 end

@@ -16,6 +16,7 @@ ThirstTrapItems = {
     1487,
     8075,
     8076,
+    22895, -- Conjured Cinnamon Roll (Rank 7)
   },
   stone = {
     5512,
@@ -50,6 +51,7 @@ ThirstTrapItems.spells = {
       5504,  -- Conjure Water (Rank 1)
     },
     conjureFood = {
+      28612, -- Conjure Food (Rank 7)
       10145, -- Conjure Food (Rank 6)
       10144, -- Conjure Food (Rank 5)
       6129,  -- Conjure Food (Rank 4)

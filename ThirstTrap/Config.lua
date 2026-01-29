@@ -23,7 +23,7 @@ function ThirstTrap:GetOptions()
       General = {
         type = "group", name = "General", order = 1,
         args = {
-          auto = { type="toggle", name="Auto mode", desc="Preselect amounts based on class/whisper", get=function() return ThirstTrap.db.profile.auto end, set=function(_,v) ThirstTrap.db.profile.auto = v ThirstTrap:UpdateTradeButtonGlow() end },
+          quick = { type="toggle", name="Quick mode", desc="Auto-fill trade based on class/whisper", get=function() return ThirstTrap.db.profile.quick end, set=function(_,v) ThirstTrap.db.profile.quick = v ThirstTrap:UpdateTradeButtonGlow() end },
           fallbackConjure = { type="toggle", name="Fallback conjure", desc="If insufficient stacks, click casts Conjure Water/Food instead of placing.", get=function() return ThirstTrap.db.profile.fallbackConjure end, set=function(_,v) ThirstTrap.db.profile.fallbackConjure = v ThirstTrap:UpdateTradeButtonGlow() end },
           prefer = { type="select", name="Prefer", values={ water="Water", food="Food" }, get=function() return ThirstTrap.db.profile.prefer end, set=function(_,v) ThirstTrap.db.profile.prefer = v ThirstTrap:UpdateTradeButtonIcon() end },
           headerPos = { type="header", name="Trade Button Position" },
@@ -35,6 +35,7 @@ function ThirstTrap:GetOptions()
       },
       PerClass = {
         type = "group", name = "Per Class", order = 2,
+        childGroups = "tree", -- show classes in the left tree instead of a selector list
         args = perClassArgs,
       },
       BG_Arena = {

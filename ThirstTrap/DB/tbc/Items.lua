@@ -16,6 +16,7 @@ ThirstTrapItems = {
     1487,
     8075,
     8076,
+    22895, -- Conjured Cinnamon Roll (TBC)
   },
   stone = {
     5512,
