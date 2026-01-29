@@ -5,8 +5,10 @@ local AceConfig = LibStub("AceConfig-3.0")
 local AceConfigDialog = LibStub("AceConfigDialog-3.0")
 local LibDBIcon = LibStub("LibDBIcon-1.0")
 local LDB = LibStub("LibDataBroker-1.1", true)
+local LBG = LibStub("LibButtonGlow-1.0", true)
 
 local MAX_TRADE_STACKS = 6
+local ShouldConjure -- forward declaration for secure-click logic
 
 -- Container API compatibility (Classic uses C_Container)
 local function BagNumSlots(bag)
@@ -196,7 +198,7 @@ end
 
 function ThirstTrap:OnWhisper(msg, sender)
   -- Parse simple overrides
-  local stacks = tonumber(msg:match("(%%d+)%s*stack")) or tonumber(msg:match("(%%d+)%s*stacks"))
+  local stacks = tonumber(msg:match("(%d+)%s*stack")) or tonumber(msg:match("(%d+)%s*stacks"))
   local waterOnly = msg:lower():match("water%W+only") or msg:lower():match("^water$") or msg:lower():match("water pls")
   local foodOnly = msg:lower():match("food%W+only") or msg:lower():match("^food$") or msg:lower():match("food pls")
   local stoneReq = msg:lower():match("healthstone") or msg:lower():match("%f[%a]hs%f[%A]")
@@ -219,32 +221,30 @@ function ThirstTrap:OnWhisper(msg, sender)
   self:UpdateTradeButtonGlow()
 end
 
-function ThirstTrap:CreateTradeButton()
-  if TRADE_BTN then return end
-  if not TradeFrame then return end
-
-  TRADE_BTN = CreateFrame("Button", ADDON_NAME.."TradeButton", UIParent, "SecureActionButtonTemplate")
-  TRADE_BTN:SetSize(28, 28)
-  self:UpdateTradeButtonPosition()
-  TRADE_BTN:SetFrameStrata("HIGH")
-  TRADE_BTN:SetFrameLevel((TradeFrame and TradeFrame:GetFrameLevel() or 1) + 10)
-  TRADE_BTN:Hide()
-
-  TRADE_BTN.icon = TRADE_BTN:CreateTexture(nil, "ARTWORK")
-  TRADE_BTN.icon:SetAllPoints()
-  TRADE_BTN.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-
-  TRADE_BTN.border = TRADE_BTN:CreateTexture(nil, "OVERLAY")
-  TRADE_BTN.border:SetTexture("Interface/Buttons/UI-Quickslot2")
-  TRADE_BTN.border:SetAllPoints()
-
-  TRADE_BTN:EnableMouse(true)
-  TRADE_BTN:RegisterForClicks("AnyUp")
-
+function ThirstTrap:UpdateTradeButtonGlow()
+  if not TRADE_BTN then return end
+  local needConjure = false
+  if IsMage() then
+    local targetClass = GetTradePartnerClass()
+    local prefer, waterAmt, foodAmt = self:GetConfiguredAmounts(targetClass)
+    local bagStacks = self:GetBagStacks()
+    needConjure = self:NeedsConjure(prefer, waterAmt, foodAmt, bagStacks)
+  elseif IsWarlock() then
+    needConjure = self:NeedsConjureWarlock()
+  end
+  if self.db.profile.fallbackConjure and needConjure then
+    if LBG then LBG.ShowOverlayGlow(TRADE_BTN) else TRADE_BTN.border:SetVertexColor(1, 0.3, 0.3) end
+  else
+    if LBG then LBG.HideOverlayGlow(TRADE_BTN) end
+    if self.db.profile.auto or self.requestOverride.prefer then
+      TRADE_BTN.border:SetVertexColor(0, 1, 1)
+    else
+      TRADE_BTN.border:SetVertexColor(1, 1, 1)
+    end
+  end
+end
   TRADE_BTN:SetScript("PreClick", function(btn, mouseButton)
-      if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
-        ThirstTrap:Print("PreClick mouse="..tostring(mouseButton))
-      end
+    -- All protected actions must happen here during the secure click
     if mouseButton ~= "LeftButton" then
       btn:SetAttribute("type", nil)
       btn:SetAttribute("spell", nil)
@@ -260,18 +260,41 @@ function ThirstTrap:CreateTradeButton()
       local prefer, waterAmt, foodAmt = ThirstTrap:GetConfiguredAmounts(targetClass)
       local bagStacks = ThirstTrap:GetBagStacks()
       local needConjure, needKind = ShouldConjure(prefer, waterAmt, foodAmt, bagStacks)
-        if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
-          ThirstTrap:Print(string.format("PreClick conjure? %s kind=%s", tostring(needConjure), tostring(needKind)))
-        end
       if ThirstTrap.db.profile.fallbackConjure and needConjure then
         local spell = ThirstTrap:GetConjureSpell(needKind)
-          if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
-            ThirstTrap:Print("PreClick spell="..tostring(spell))
-          end
         if spell then
           btn:SetAttribute("type", "spell")
           btn:SetAttribute("spell", spell)
           return
+        end
+      end
+      -- Place stacks directly during the secure click
+      local toPlace = {}
+      if prefer == "water" then
+        for i=1, waterAmt do toPlace[#toPlace+1] = "water" end
+        for i=1, foodAmt  do toPlace[#toPlace+1] = "food" end
+      else
+        for i=1, foodAmt  do toPlace[#toPlace+1] = "food" end
+        for i=1, waterAmt do toPlace[#toPlace+1] = "water" end
+      end
+      if #toPlace > MAX_TRADE_STACKS then
+        while #toPlace > MAX_TRADE_STACKS do table.remove(toPlace) end
+      end
+      local placed = 0
+      for idx=1, #toPlace do
+        if placed >= MAX_TRADE_STACKS then break end
+        local kind = toPlace[idx]
+        local stacks = bagStacks[kind]
+        local entry = stacks and stacks[1]
+        if entry then
+          ClearCursor()
+          PickupBagItem(entry.bag, entry.slot)
+          local tradeBtn = _G["TradePlayerItem"..(placed+1).."ItemButton"]
+          if tradeBtn then tradeBtn:Click() end
+          ClearCursor()
+          table.remove(stacks, 1)
+          placed = placed + 1
+          ThirstTrap:IncrementStats(kind, entry.count or 1)
         end
       end
     elseif IsWarlock() then
@@ -283,6 +306,17 @@ function ThirstTrap:CreateTradeButton()
           btn:SetAttribute("spell", spell)
           return
         end
+      end
+      -- Warlock: place one healthstone if available
+      local stacks = ThirstTrap:GetBagStacks().stone
+      local entry = stacks and stacks[1]
+      if entry then
+        ClearCursor()
+        PickupBagItem(entry.bag, entry.slot)
+        local tradeBtn = _G["TradePlayerItem1ItemButton"]
+        if tradeBtn then tradeBtn:Click() end
+        ClearCursor()
+        ThirstTrap:IncrementStats("stone", entry.count or 1)
       end
     end
     btn:SetAttribute("type", nil)
@@ -305,34 +339,8 @@ function ThirstTrap:CreateTradeButton()
   TRADE_BTN:SetScript("OnClick", function(btn, mouseButton)
     if mouseButton == "RightButton" then
       ThirstTrap:OpenConfig()
-      return
     end
-    if not (IsMage() or IsWarlock()) then return end
-    if not (TradeFrame and TradeFrame:IsShown()) then return end
-    -- Refresh inventory just before placing to ensure up-to-date stacks
-    ThirstTrap:ScanInventory()
-      if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
-        local bs = ThirstTrap:GetBagStacks()
-        ThirstTrap:Print(string.format("Click stacks: water=%d food=%d stone=%d", #(bs.water or {}), #(bs.food or {}), #(bs.stone or {})))
-      end
-    if IsMage() then
-      local targetClass = GetTradePartnerClass()
-      local prefer, waterAmt, foodAmt = ThirstTrap:GetConfiguredAmounts(targetClass)
-      local bagStacks = ThirstTrap:GetBagStacks()
-      local needConjure = ShouldConjure(prefer, waterAmt, foodAmt, bagStacks)
-      if ThirstTrap.db.profile.fallbackConjure and needConjure then
-        return
-      else
-        ThirstTrap:ExecuteTrade()
-      end
-    elseif IsWarlock() then
-      local needConjure = ThirstTrap:NeedsConjureWarlock()
-      if ThirstTrap.db.profile.fallbackConjure and needConjure then
-        return
-      else
-        ThirstTrap:ExecuteTradeWarlock()
-      end
-    end
+    -- All placement happens in PreClick; OnClick only handles right-click config
   end)
 
   self:UpdateTradeButtonIcon()
@@ -352,26 +360,6 @@ function ThirstTrap:UpdateTradeButtonState()
   local enabled = (IsMage() or IsWarlock())
   TRADE_BTN:SetEnabled(enabled)
   TRADE_BTN:SetAlpha(enabled and 1 or 0.4)
-end
-
-function ThirstTrap:UpdateTradeButtonGlow()
-  if not TRADE_BTN then return end
-  local needConjure
-  if IsMage() then
-    local targetClass = GetTradePartnerClass()
-    local prefer, waterAmt, foodAmt = self:GetConfiguredAmounts(targetClass)
-    local bagStacks = self:GetBagStacks()
-    needConjure = self:NeedsConjure(prefer, waterAmt, foodAmt, bagStacks)
-  elseif IsWarlock() then
-    needConjure = self:NeedsConjureWarlock()
-  end
-  if self.db.profile.fallbackConjure and needConjure then
-    TRADE_BTN.border:SetVertexColor(1, 0.3, 0.3)
-  elseif self.db.profile.auto or self.requestOverride.prefer then
-    TRADE_BTN.border:SetVertexColor(0, 1, 1)
-  else
-    TRADE_BTN.border:SetVertexColor(1, 1, 1)
-  end
 end
 
 function ThirstTrap:GetConfiguredAmounts(targetClass)
@@ -445,17 +433,7 @@ function ThirstTrap:GetNeedsTooltipLine()
 end
 
 local function TradeSlotButton(slot)
-  -- Prefer player's trade slots on the left
-  local btn = _G["TradePlayerItem"..slot]
-  if btn and btn.GetName and _G[btn:GetName().."ItemButton"] then
-    btn = _G[btn:GetName().."ItemButton"]
-  end
-  if btn then return btn end
-  -- Fallbacks for different UI naming
-  btn = _G["TradeFrameItem"..slot.."ItemButton"]
-  if btn then return btn end
-  btn = _G["TradeRecipientItem"..slot.."ItemButton"]
-  return btn
+  return _G["TradePlayerItem"..slot.."ItemButton"]
 end
 
 local function PlaceStackFromBagToTrade(bag, slot, tradeSlot)
