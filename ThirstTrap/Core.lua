@@ -179,6 +179,8 @@ function ThirstTrap:OnBagUpdate()
 end
 
 function ThirstTrap:OnTradeShow()
+  -- Ensure the button exists once TradeFrame is actually loaded
+  self:CreateTradeButton()
   self:UpdateTradeButtonState()
   self:UpdateTradeButtonGlow()
 end
@@ -220,7 +222,8 @@ function ThirstTrap:CreateTradeButton()
 
   TRADE_BTN = CreateFrame("Button", ADDON_NAME.."TradeButton", TradeFrame, "SecureActionButtonTemplate")
   TRADE_BTN:SetSize(28, 28)
-  TRADE_BTN:SetPoint("TOPRIGHT", TradeFrame, "TOPLEFT", -4, -28)
+  -- Place inside the trade frame for consistent visibility
+  TRADE_BTN:SetPoint("TOPLEFT", TradeFrame, "TOPLEFT", 8, -40)
 
   TRADE_BTN.icon = TRADE_BTN:CreateTexture(nil, "ARTWORK")
   TRADE_BTN.icon:SetAllPoints()
