@@ -8,6 +8,37 @@ local LDB = LibStub("LibDataBroker-1.1", true)
 
 local MAX_TRADE_STACKS = 6
 
+-- Container API compatibility (Classic uses C_Container)
+local function BagNumSlots(bag)
+  if C_Container and C_Container.GetContainerNumSlots then
+    return C_Container.GetContainerNumSlots(bag)
+  end
+  return GetContainerNumSlots(bag)
+end
+
+local function BagItemID(bag, slot)
+  if C_Container and C_Container.GetContainerItemID then
+    return C_Container.GetContainerItemID(bag, slot)
+  end
+  return GetContainerItemID(bag, slot)
+end
+
+local function BagItemCount(bag, slot)
+  if C_Container and C_Container.GetContainerItemInfo then
+    local info = C_Container.GetContainerItemInfo(bag, slot)
+    return info and info.stackCount or nil
+  end
+  local _, count = GetContainerItemInfo(bag, slot)
+  return count
+end
+
+local function PickupBagItem(bag, slot)
+  if C_Container and C_Container.PickupContainerItem then
+    return C_Container.PickupContainerItem(bag, slot)
+  end
+  return PickupContainerItem(bag, slot)
+end
+
 ThirstTrap.defaults = {
   profile = {
     auto = true,
@@ -383,7 +414,7 @@ end
 
 local function PlaceStackFromBagToTrade(bag, slot, tradeSlot)
   ClearCursor()
-  PickupContainerItem(bag, slot)
+  PickupBagItem(bag, slot)
   local btn = TradeSlotButton(tradeSlot)
   if btn then btn:Click() end
   ClearCursor()
@@ -467,10 +498,10 @@ end
 function ThirstTrap:GetBagStacks()
   local stacks = { water = {}, food = {}, stone = {} }
   for bag=0, NUM_BAG_SLOTS do
-    for slot=1, GetContainerNumSlots(bag) do
-      local itemID = GetContainerItemID(bag, slot)
+    for slot=1, BagNumSlots(bag) do
+      local itemID = BagItemID(bag, slot)
       if itemID then
-        local _, count = GetContainerItemInfo(bag, slot)
+        local count = BagItemCount(bag, slot)
         if ThirstTrapItems:IsWater(itemID) then
           table.insert(stacks.water, { bag=bag, slot=slot, count=count or 20 })
         elseif ThirstTrapItems:IsFood(itemID) then
@@ -497,10 +528,10 @@ function ThirstTrap:ScanInventory()
   local bestStoneCount, bestStoneID = 0, nil
 
   for bag=0, NUM_BAG_SLOTS do
-    for slot=1, GetContainerNumSlots(bag) do
-      local itemID = GetContainerItemID(bag, slot)
+    for slot=1, BagNumSlots(bag) do
+      local itemID = BagItemID(bag, slot)
       if itemID then
-        local _, count = GetContainerItemInfo(bag, slot)
+        local count = BagItemCount(bag, slot)
         if ThirstTrapItems:IsWater(itemID) then
           inv.water.total = inv.water.total + (count or 0)
           inv.water.stacks = inv.water.stacks + 1

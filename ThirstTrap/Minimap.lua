@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ThirstTrap = _G[ADDON_NAME]
+local ThirstTrap = LibStub("AceAddon-3.0"):GetAddon(ADDON_NAME)
 
 function ThirstTrap:ToggleMinimapIcon(show)
   local LibDBIcon = LibStub("LibDBIcon-1.0")

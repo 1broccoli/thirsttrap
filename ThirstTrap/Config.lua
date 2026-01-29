@@ -1,5 +1,5 @@
 local ADDON_NAME = ...
-local ThirstTrap = _G[ADDON_NAME]
+local ThirstTrap = LibStub("AceAddon-3.0"):GetAddon(ADDON_NAME)
 
 function ThirstTrap:GetOptions()
   local classes = { WARRIOR=true, PALADIN=true, HUNTER=true, ROGUE=true, PRIEST=true, SHAMAN=true, MAGE=true, WARLOCK=true, DRUID=true }
