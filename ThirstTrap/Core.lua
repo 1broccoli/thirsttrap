@@ -181,6 +181,7 @@ end
 function ThirstTrap:OnTradeShow()
   -- Ensure the button exists once TradeFrame is actually loaded
   self:CreateTradeButton()
+  if TRADE_BTN then TRADE_BTN:Show() end
   self:UpdateTradeButtonState()
   self:UpdateTradeButtonGlow()
 end
@@ -189,6 +190,7 @@ function ThirstTrap:OnTradeClosed()
   self.requestOverride.water = nil
   self.requestOverride.food = nil
   self.requestOverride.prefer = nil
+  if TRADE_BTN then TRADE_BTN:Hide() end
 end
 
 function ThirstTrap:OnWhisper(msg, sender)
@@ -220,10 +222,13 @@ function ThirstTrap:CreateTradeButton()
   if TRADE_BTN then return end
   if not TradeFrame then return end
 
-  TRADE_BTN = CreateFrame("Button", ADDON_NAME.."TradeButton", TradeFrame, "SecureActionButtonTemplate")
+  TRADE_BTN = CreateFrame("Button", ADDON_NAME.."TradeButton", UIParent, "SecureActionButtonTemplate")
   TRADE_BTN:SetSize(28, 28)
-  -- Place to the right of the TradeFrame
-  TRADE_BTN:SetPoint("TOPLEFT", TradeFrame, "TOPRIGHT", 6, -28)
+  -- Place to the right of the TradeFrame (outside the frame bounds)
+  TRADE_BTN:SetPoint("LEFT", TradeFrame, "RIGHT", 8, -28)
+  TRADE_BTN:SetFrameStrata("HIGH")
+  TRADE_BTN:SetFrameLevel((TradeFrame and TradeFrame:GetFrameLevel() or 1) + 10)
+  TRADE_BTN:Hide()
 
   TRADE_BTN.icon = TRADE_BTN:CreateTexture(nil, "ARTWORK")
   TRADE_BTN.icon:SetAllPoints()
