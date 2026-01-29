@@ -259,7 +259,7 @@ function ThirstTrap:CreateTradeButton()
       local targetClass = GetTradePartnerClass()
       local prefer, waterAmt, foodAmt = ThirstTrap:GetConfiguredAmounts(targetClass)
       local bagStacks = ThirstTrap:GetBagStacks()
-      local needConjure, needKind = ThirstTrap:NeedsConjure(prefer, waterAmt, foodAmt, bagStacks)
+      local needConjure, needKind = ShouldConjure(prefer, waterAmt, foodAmt, bagStacks)
         if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
           ThirstTrap:Print(string.format("PreClick conjure? %s kind=%s", tostring(needConjure), tostring(needKind)))
         end
@@ -319,7 +319,7 @@ function ThirstTrap:CreateTradeButton()
       local targetClass = GetTradePartnerClass()
       local prefer, waterAmt, foodAmt = ThirstTrap:GetConfiguredAmounts(targetClass)
       local bagStacks = ThirstTrap:GetBagStacks()
-      local needConjure = ThirstTrap:NeedsConjure(prefer, waterAmt, foodAmt, bagStacks)
+      local needConjure = ShouldConjure(prefer, waterAmt, foodAmt, bagStacks)
       if ThirstTrap.db.profile.fallbackConjure and needConjure then
         return
       else
@@ -393,6 +393,14 @@ function ThirstTrap:NeedsConjure(prefer, waterAmt, foodAmt, bagStacks)
   local needFood  = foodAmt  > foodStacks
   if needWater then return true, "water" end
   if needFood then return true, "food" end
+  return false, nil
+end
+
+local function ShouldConjure(prefer, waterAmt, foodAmt, bagStacks)
+  local waterStacks = (bagStacks.water and #bagStacks.water or 0)
+  local foodStacks  = (bagStacks.food  and #bagStacks.food  or 0)
+  if waterAmt > waterStacks and waterStacks == 0 then return true, "water" end
+  if foodAmt  > foodStacks  and foodStacks  == 0 then return true, "food" end
   return false, nil
 end
 
