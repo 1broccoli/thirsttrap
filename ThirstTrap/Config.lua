@@ -26,6 +26,11 @@ function ThirstTrap:GetOptions()
           auto = { type="toggle", name="Auto mode", desc="Preselect amounts based on class/whisper", get=function() return ThirstTrap.db.profile.auto end, set=function(_,v) ThirstTrap.db.profile.auto = v ThirstTrap:UpdateTradeButtonGlow() end },
           fallbackConjure = { type="toggle", name="Fallback conjure", desc="If insufficient stacks, click casts Conjure Water/Food instead of placing.", get=function() return ThirstTrap.db.profile.fallbackConjure end, set=function(_,v) ThirstTrap.db.profile.fallbackConjure = v ThirstTrap:UpdateTradeButtonGlow() end },
           prefer = { type="select", name="Prefer", values={ water="Water", food="Food" }, get=function() return ThirstTrap.db.profile.prefer end, set=function(_,v) ThirstTrap.db.profile.prefer = v ThirstTrap:UpdateTradeButtonIcon() end },
+          headerPos = { type="header", name="Trade Button Position" },
+          point = { type="select", name="Button anchor", values={ LEFT="LEFT", TOPLEFT="TOPLEFT", TOPRIGHT="TOPRIGHT" }, get=function() return ThirstTrap.db.profile.position.point end, set=function(_,v) ThirstTrap.db.profile.position.point=v ThirstTrap:UpdateTradeButtonPosition() end },
+          relativePoint = { type="select", name="Relative to TradeFrame", values={ RIGHT="RIGHT", TOPRIGHT="TOPRIGHT", TOPLEFT="TOPLEFT" }, get=function() return ThirstTrap.db.profile.position.relativePoint end, set=function(_,v) ThirstTrap.db.profile.position.relativePoint=v ThirstTrap:UpdateTradeButtonPosition() end },
+          x = { type="range", name="Offset X", min=-100, max=100, step=1, get=function() return ThirstTrap.db.profile.position.x end, set=function(_,v) ThirstTrap.db.profile.position.x=v ThirstTrap:UpdateTradeButtonPosition() end },
+          y = { type="range", name="Offset Y", min=-100, max=100, step=1, get=function() return ThirstTrap.db.profile.position.y end, set=function(_,v) ThirstTrap.db.profile.position.y=v ThirstTrap:UpdateTradeButtonPosition() end },
         }
       },
       PerClass = {

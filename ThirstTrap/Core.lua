@@ -44,6 +44,7 @@ ThirstTrap.defaults = {
     auto = true,
     minimap = { hide = false },
     fallbackConjure = true,
+    position = { point = "LEFT", relativePoint = "RIGHT", x = 8, y = -28 },
     perClass = {
       WARRIOR = { water = 0, food = 4 },
       PALADIN = { water = 3, food = 1 },
@@ -224,8 +225,7 @@ function ThirstTrap:CreateTradeButton()
 
   TRADE_BTN = CreateFrame("Button", ADDON_NAME.."TradeButton", UIParent, "SecureActionButtonTemplate")
   TRADE_BTN:SetSize(28, 28)
-  -- Place to the right of the TradeFrame (outside the frame bounds)
-  TRADE_BTN:SetPoint("LEFT", TradeFrame, "RIGHT", 8, -28)
+  self:UpdateTradeButtonPosition()
   TRADE_BTN:SetFrameStrata("HIGH")
   TRADE_BTN:SetFrameLevel((TradeFrame and TradeFrame:GetFrameLevel() or 1) + 10)
   TRADE_BTN:Hide()
@@ -325,6 +325,13 @@ function ThirstTrap:CreateTradeButton()
   self:UpdateTradeButtonGlow()
 end
 
+function ThirstTrap:UpdateTradeButtonPosition()
+  if not TRADE_BTN or not TradeFrame then return end
+  local pos = self.db and self.db.profile and self.db.profile.position or { point = "LEFT", relativePoint = "RIGHT", x = 8, y = -28 }
+  TRADE_BTN:ClearAllPoints()
+  TRADE_BTN:SetPoint(pos.point or "LEFT", TradeFrame, pos.relativePoint or "RIGHT", pos.x or 8, pos.y or -28)
+end
+
 function ThirstTrap:UpdateTradeButtonState()
   if not TRADE_BTN then return end
   local enabled = (IsMage() or IsWarlock())
@@ -415,8 +422,13 @@ function ThirstTrap:GetNeedsTooltipLine()
 end
 
 local function TradeSlotButton(slot)
-  local name = "TradeFrameItem"..slot.."ItemButton"
-  local btn = _G[name]
+  -- Prefer player's trade slots on the left
+  local btn = _G["TradePlayerItem"..slot.."ItemButton"]
+  if btn then return btn end
+  -- Fallbacks for different UI naming
+  btn = _G["TradeFrameItem"..slot.."ItemButton"]
+  if btn then return btn end
+  btn = _G["TradeRecipientItem"..slot.."ItemButton"]
   return btn
 end
 
