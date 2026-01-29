@@ -46,6 +46,7 @@ ThirstTrap.defaults = {
     auto = true,
     minimap = { hide = false },
     fallbackConjure = true,
+    debug = false,
     position = { point = "LEFT", relativePoint = "RIGHT", x = 8, y = -28 },
     perClass = {
       WARRIOR = { water = 0, food = 4 },
@@ -276,16 +277,23 @@ function ThirstTrap:CreateTradeButton()
       local targetClass = GetTradePartnerClass()
       local prefer, waterAmt, foodAmt = ThirstTrap:GetConfiguredAmounts(targetClass)
       local bagStacks = ThirstTrap:GetBagStacks()
+      if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
+        ThirstTrap:Print(string.format("PreClick Mage: targetClass=%s prefer=%s water=%d food=%d", tostring(targetClass), tostring(prefer), waterAmt, foodAmt))
+        ThirstTrap:Print(string.format("Bag stacks: water=%d food=%d", #(bagStacks.water or {}), #(bagStacks.food or {})))
+      end
       local needConjure, needKind = ShouldConjure(prefer, waterAmt, foodAmt, bagStacks)
       if ThirstTrap.db.profile.fallbackConjure and needConjure then
         local spell = ThirstTrap:GetConjureSpell(needKind)
         if spell then
           btn:SetAttribute("type", "spell")
           btn:SetAttribute("spell", spell)
+          if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
+            ThirstTrap:Print("Casting conjure: "..tostring(spell))
+          end
           return
         end
       end
-      -- Build macro to place stacks securely during the click
+      -- Place stacks directly during the secure click
       local toPlace = {}
       if prefer == "water" then
         for i=1, waterAmt do toPlace[#toPlace+1] = "water" end
@@ -297,7 +305,6 @@ function ThirstTrap:CreateTradeButton()
       if #toPlace > MAX_TRADE_STACKS then
         while #toPlace > MAX_TRADE_STACKS do table.remove(toPlace) end
       end
-      local macroLines = {}
       local placed = 0
       for idx=1, #toPlace do
         if placed >= MAX_TRADE_STACKS then break end
@@ -305,17 +312,25 @@ function ThirstTrap:CreateTradeButton()
         local stacks = bagStacks[kind]
         local entry = stacks and stacks[1]
         if entry then
-          macroLines[#macroLines+1] = "/use "..entry.bag.." "..entry.slot
-          macroLines[#macroLines+1] = "/click TradePlayerItem"..(placed+1).."ItemButton"
+          ClearCursor()
+          if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
+            ThirstTrap:Print(string.format("Pickup %s stack from bag=%d slot=%d (count=%s) -> tradeSlot=%d", kind, entry.bag, entry.slot, tostring(entry.count), placed+1))
+          end
+          PickupBagItem(entry.bag, entry.slot)
+          local tradeBtn = _G["TradePlayerItem"..(placed+1).."ItemButton"]
+          if type(ClickTradeButton) == "function" then
+            ClickTradeButton(placed+1)
+          elseif tradeBtn and tradeBtn.Click then
+            tradeBtn:Click()
+          end
+          ClearCursor()
           table.remove(stacks, 1)
           placed = placed + 1
           ThirstTrap:IncrementStats(kind, entry.count or 1)
         end
       end
-      if placed > 0 then
-        btn:SetAttribute("type", "macro")
-        btn:SetAttribute("macrotext", table.concat(macroLines, "\n"))
-        return
+      if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
+        ThirstTrap:Print("Placed stacks: "..placed)
       end
     elseif IsWarlock() then
       local needConjure = ThirstTrap:NeedsConjureWarlock()
@@ -327,14 +342,21 @@ function ThirstTrap:CreateTradeButton()
           return
         end
       end
-      -- Warlock: place one healthstone via secure macro
+      -- Warlock: place one healthstone if available
       local stacks = ThirstTrap:GetBagStacks().stone
       local entry = stacks and stacks[1]
       if entry then
-        btn:SetAttribute("type", "macro")
-        btn:SetAttribute("macrotext", "/use "..entry.bag.." "..entry.slot.."\n/click TradePlayerItem1ItemButton")
+        ClearCursor()
+        if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
+          ThirstTrap:Print(string.format("Pickup stone from bag=%d slot=%d -> tradeSlot=1", entry.bag, entry.slot))
+        end
+        PickupBagItem(entry.bag, entry.slot)
+        if type(ClickTradeButton) == "function" then ClickTradeButton(1) else
+          local tradeBtn = _G["TradePlayerItem1ItemButton"]
+          if tradeBtn and tradeBtn.Click then tradeBtn:Click() end
+        end
+        ClearCursor()
         ThirstTrap:IncrementStats("stone", entry.count or 1)
-        return
       end
     end
     btn:SetAttribute("type", nil)
@@ -348,7 +370,7 @@ function ThirstTrap:CreateTradeButton()
     GameTooltip:AddLine("Right-click: open config", 1,1,1)
     local targetClass = GetTradePartnerClass()
     local prefer, waterAmt, foodAmt = ThirstTrap:GetConfiguredAmounts(targetClass)
-    GameTooltip:AddLine(string.format("Will place: %d water%s", waterAmt, (foodAmt>0 and " / "..foodAmt.." food" or "")), 0.8,1,0.8)
+    GameTooltip:AddLine(string.format("Will place: %d %s%s", (prefer=="food" and foodAmt or waterAmt), (prefer=="food" and "food" or "water"), (prefer=="food" and (waterAmt>0 and " / "..waterAmt.." water" or "") or (foodAmt>0 and " / "..foodAmt.." food" or ""))), 0.8,1,0.8)
     local needLine = ThirstTrap:GetNeedsTooltipLine()
     if needLine then GameTooltip:AddLine(needLine, 1,0.8,0.8) end
     GameTooltip:Show()
@@ -458,12 +480,16 @@ end
 local function PlaceStackFromBagToTrade(bag, slot, tradeSlot)
   ClearCursor()
   PickupBagItem(bag, slot)
-  local btn = TradeSlotButton(tradeSlot)
-  if btn then
-    btn:Click()
+  if type(ClickTradeButton) == "function" then
+    ClickTradeButton(tradeSlot)
   else
-    if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
-      ThirstTrap:Print("Trade slot button missing for slot "..tostring(tradeSlot))
+    local btn = TradeSlotButton(tradeSlot)
+    if btn and btn.Click then
+      btn:Click()
+    else
+      if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
+        ThirstTrap:Print("Trade slot button missing for slot "..tostring(tradeSlot))
+      end
     end
   end
   ClearCursor()
@@ -564,6 +590,9 @@ function ThirstTrap:GetBagStacks()
   table.sort(stacks.water, function(a,b) return a.count > b.count end)
   table.sort(stacks.food,  function(a,b) return a.count > b.count end)
   table.sort(stacks.stone, function(a,b) return a.count > b.count end)
+  if ThirstTrap.db and ThirstTrap.db.profile and ThirstTrap.db.profile.debug then
+    ThirstTrap:Print(string.format("Scan: water=%d food=%d stone=%d", #stacks.water, #stacks.food, #stacks.stone))
+  end
   return stacks
 end
 
