@@ -285,7 +285,7 @@ function ThirstTrap:CreateTradeButton()
           return
         end
       end
-      -- Place stacks directly during the secure click
+      -- Build macro to place stacks securely during the click
       local toPlace = {}
       if prefer == "water" then
         for i=1, waterAmt do toPlace[#toPlace+1] = "water" end
@@ -297,6 +297,7 @@ function ThirstTrap:CreateTradeButton()
       if #toPlace > MAX_TRADE_STACKS then
         while #toPlace > MAX_TRADE_STACKS do table.remove(toPlace) end
       end
+      local macroLines = {}
       local placed = 0
       for idx=1, #toPlace do
         if placed >= MAX_TRADE_STACKS then break end
@@ -304,15 +305,17 @@ function ThirstTrap:CreateTradeButton()
         local stacks = bagStacks[kind]
         local entry = stacks and stacks[1]
         if entry then
-          ClearCursor()
-          PickupBagItem(entry.bag, entry.slot)
-          local tradeBtn = _G["TradePlayerItem"..(placed+1).."ItemButton"]
-          if tradeBtn then tradeBtn:Click() end
-          ClearCursor()
+          macroLines[#macroLines+1] = "/use "..entry.bag.." "..entry.slot
+          macroLines[#macroLines+1] = "/click TradePlayerItem"..(placed+1).."ItemButton"
           table.remove(stacks, 1)
           placed = placed + 1
           ThirstTrap:IncrementStats(kind, entry.count or 1)
         end
+      end
+      if placed > 0 then
+        btn:SetAttribute("type", "macro")
+        btn:SetAttribute("macrotext", table.concat(macroLines, "\n"))
+        return
       end
     elseif IsWarlock() then
       local needConjure = ThirstTrap:NeedsConjureWarlock()
@@ -324,16 +327,14 @@ function ThirstTrap:CreateTradeButton()
           return
         end
       end
-      -- Warlock: place one healthstone if available
+      -- Warlock: place one healthstone via secure macro
       local stacks = ThirstTrap:GetBagStacks().stone
       local entry = stacks and stacks[1]
       if entry then
-        ClearCursor()
-        PickupBagItem(entry.bag, entry.slot)
-        local tradeBtn = _G["TradePlayerItem1ItemButton"]
-        if tradeBtn then tradeBtn:Click() end
-        ClearCursor()
+        btn:SetAttribute("type", "macro")
+        btn:SetAttribute("macrotext", "/use "..entry.bag.." "..entry.slot.."\n/click TradePlayerItem1ItemButton")
         ThirstTrap:IncrementStats("stone", entry.count or 1)
+        return
       end
     end
     btn:SetAttribute("type", nil)
@@ -345,10 +346,11 @@ function ThirstTrap:CreateTradeButton()
     GameTooltip:AddLine(ADDON_NAME)
     GameTooltip:AddLine("Left-click: place configured stacks", 1,1,1)
     GameTooltip:AddLine("Right-click: open config", 1,1,1)
+    local targetClass = GetTradePartnerClass()
+    local prefer, waterAmt, foodAmt = ThirstTrap:GetConfiguredAmounts(targetClass)
+    GameTooltip:AddLine(string.format("Will place: %d water%s", waterAmt, (foodAmt>0 and " / "..foodAmt.." food" or "")), 0.8,1,0.8)
     local needLine = ThirstTrap:GetNeedsTooltipLine()
-    if needLine then
-      GameTooltip:AddLine(needLine, 1,0.8,0.8)
-    end
+    if needLine then GameTooltip:AddLine(needLine, 1,0.8,0.8) end
     GameTooltip:Show()
   end)
   TRADE_BTN:SetScript("OnLeave", function() GameTooltip:Hide() end)
