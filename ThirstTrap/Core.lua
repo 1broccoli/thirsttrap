@@ -222,8 +222,8 @@ function ThirstTrap:CreateTradeButton()
 
   TRADE_BTN = CreateFrame("Button", ADDON_NAME.."TradeButton", TradeFrame, "SecureActionButtonTemplate")
   TRADE_BTN:SetSize(28, 28)
-  -- Place inside the trade frame for consistent visibility
-  TRADE_BTN:SetPoint("TOPLEFT", TradeFrame, "TOPLEFT", 8, -40)
+  -- Place to the right of the TradeFrame
+  TRADE_BTN:SetPoint("TOPLEFT", TradeFrame, "TOPRIGHT", 6, -28)
 
   TRADE_BTN.icon = TRADE_BTN:CreateTexture(nil, "ARTWORK")
   TRADE_BTN.icon:SetAllPoints()
